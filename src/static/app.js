@@ -2,16 +2,86 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitiesList = document.getElementById("activities-list");
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
+  const signupContainer = document.getElementById("signup-container");
   const messageDiv = document.getElementById("message");
+  const teacherLoginForm = document.getElementById("teacher-login-form");
+  const teacherLogoutButton = document.getElementById("teacher-logout");
+  const teacherSession = document.getElementById("teacher-session");
+  let isTeacher = false;
+  let messageTimeout;
+
+  function showMessage(message, type) {
+    messageDiv.textContent = message;
+    messageDiv.className = `message ${type}`;
+    clearTimeout(messageTimeout);
+    messageTimeout = setTimeout(() => messageDiv.classList.add("hidden"), 5000);
+  }
+
+  async function refreshTeacherSession() {
+    try {
+      const response = await fetch("/auth/session");
+      const session = await response.json();
+      isTeacher = response.ok && session.authenticated === true;
+      teacherLoginForm.classList.toggle("hidden", isTeacher);
+      teacherLogoutButton.classList.toggle("hidden", !isTeacher);
+      signupContainer.classList.toggle("hidden", !isTeacher);
+      teacherSession.textContent = isTeacher
+        ? `Signed in as ${session.username}`
+        : "";
+      teacherSession.classList.toggle("hidden", !isTeacher);
+    } catch (error) {
+      isTeacher = false;
+      teacherLoginForm.classList.remove("hidden");
+      teacherLogoutButton.classList.add("hidden");
+      signupContainer.classList.add("hidden");
+      teacherSession.classList.add("hidden");
+    }
+  }
+
+  teacherLoginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = document.getElementById("teacher-username").value;
+    const password = document.getElementById("teacher-password").value;
+
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Sign-in failed");
+
+      teacherLoginForm.reset();
+      await refreshTeacherSession();
+      await fetchActivities();
+      showMessage("Teacher signed in.", "success");
+    } catch (error) {
+      showMessage(error.message || "Unable to sign in.", "error");
+    }
+  });
+
+  teacherLogoutButton.addEventListener("click", async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST" });
+      await refreshTeacherSession();
+      await fetchActivities();
+      showMessage("Signed out. Activities remain available to view.", "success");
+    } catch (error) {
+      showMessage("Unable to sign out. Please try again.", "error");
+    }
+  });
 
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
       const response = await fetch("/activities");
+      if (!response.ok) throw new Error("Activity request failed");
       const activities = await response.json();
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -30,7 +100,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${isTeacher ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Unregister ${email}">Remove</button>` : ""}</li>`
                   )
                   .join("")}
               </ul>
@@ -86,26 +156,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
+        showMessage(result.message, "success");
 
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", "error");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to unregister. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to unregister. Please try again.", "error");
       console.error("Error unregistering:", error);
     }
   }
@@ -130,31 +189,20 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
+        showMessage(result.message, "success");
         signupForm.reset();
 
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", "error");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to sign up. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to sign up. Please try again.", "error");
       console.error("Error signing up:", error);
     }
   });
 
   // Initialize app
-  fetchActivities();
+  refreshTeacherSession().then(fetchActivities);
 });
